@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TermiChat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap');
+      
+      :root {
+        --terminal-color: #ffffff; /* Default White */
+        --terminal-bg: #000000;
+      }
+
+      body {
+        background-color: var(--terminal-bg);
+        color: var(--terminal-color);
+        font-family: 'Fira Code', 'Courier New', monospace;
+        overflow: hidden;
+      }
+
+      /* Helper class for React components to bind to the variable */
+      .text-theme {
+        color: var(--terminal-color);
+      }
+      .border-theme {
+        border-color: var(--terminal-color);
+      }
+      .bg-theme {
+        background-color: var(--terminal-color);
+      }
+      .caret-theme {
+        caret-color: var(--terminal-color);
+      }
+
+      /* Custom Scrollbar for Webkit */
+      ::-webkit-scrollbar {
+        width: 10px;
+        background: #000;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #333;
+        border: 1px solid var(--terminal-color);
+      }
+
+      /* CRT Effect (Static Glow only, no flicker) */
+      .crt-effect {
+        text-shadow: 0 0 2px var(--terminal-color);
+      }
+      
+      /* Blinking Cursor */
+      .blinking-cursor::after {
+        content: '█';
+        animation: blink 1s step-end infinite;
+        color: var(--terminal-color);
+        margin-left: 2px;
+      }
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

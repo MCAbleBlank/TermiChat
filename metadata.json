@@ -1,0 +1,5 @@
+{
+  "name": "TermiChat",
+  "description": "A retro terminal-style chat client with simulated WebSocket connectivity, ANSI support, and AI-powered interactions.",
+  "requestFramePermissions": []
+}
