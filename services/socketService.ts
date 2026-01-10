@@ -195,6 +195,7 @@ class SocketService {
             id: data.id || (Date.now().toString() + Math.random()), // Use Server ID if available
             userId: data.userId || 'system',
             username: data.username || 'SYSTEM',
+            role: data.role,
             content: data.content,
             timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
             type: data.type === 'system' ? 'system' : 'chat'
@@ -212,7 +213,7 @@ class SocketService {
   /**
    * Client-side processing of user registry data
    */
-  private formatRegistryToAnsi(registry: Record<string, { status: string, lastSeen: string }>): string {
+  private formatRegistryToAnsi(registry: Record<string, { status: string, lastSeen: string, role?: string }>): string {
     const entries = Object.entries(registry);
     if (entries.length === 0) return 'User registry is empty.';
 
@@ -228,8 +229,9 @@ class SocketService {
         const statusColor = info.status === 'online' ? ANSI.GREEN : ANSI.RED;
         const statusIcon = info.status === 'online' ? '●' : '○';
         const dateStr = info.lastSeen ? new Date(info.lastSeen).toLocaleString() : 'Never';
+        const roleStr = info.role === 'admin' ? `${ANSI.RED}[ADMIN]${ANSI.RESET}` : '';
         
-        return `  ${statusColor}${statusIcon} ${ANSI.RESET}${user.padEnd(15)} [${info.status.toUpperCase()}] Last Seen: ${dateStr}`;
+        return `  ${statusColor}${statusIcon} ${ANSI.RESET}${roleStr} ${user.padEnd(15)} [${info.status.toUpperCase()}] Last Seen: ${dateStr}`;
     });
 
     if (entries.length > 50) {

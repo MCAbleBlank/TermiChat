@@ -64,7 +64,7 @@ const App: React.FC = () => {
     // Boot Sequence
     const runBootSequence = async () => {
         const bootSteps = [
-            `INITIALIZING TERM-CHAT KERNEL v2.5.0...`,
+            `INITIALIZING TERM-CHAT KERNEL v3.0.0...`,
             `LOADING MEMORY MODULES... [OK]`,
             `MOUNTING VIRTUAL FILE SYSTEM... [OK]`,
             `CHECKING NETWORK INTERFACES... [OK]`,
@@ -89,7 +89,7 @@ const App: React.FC = () => {
             userId: 'system',
             username: 'SYSTEM',
             content: `
-${ANSI.GREEN}Welcome to TermiChat v2.5.0${ANSI.RESET}
+${ANSI.GREEN}Welcome to TermiChat v3.0.0${ANSI.RESET}
 ${ANSI.WHITE}---------------------------${ANSI.RESET}
 Client initialized.
 Logged in as: ${ANSI.YELLOW}${localStorage.getItem('termichat_username') || 'User_????'}${ANSI.RESET}
@@ -139,14 +139,14 @@ Type ${ANSI.CYAN}/help${ANSI.RESET} to see available commands.
 ${ANSI.WHITE}Available Commands:${ANSI.RESET}
   ${ANSI.CYAN}/connect <url> ${ANSI.RESET} - Connect to HTTP/SSE Server
   ${ANSI.CYAN}/nick <name>   ${ANSI.RESET} - Change your display name
-  ${ANSI.CYAN}/color <name>  ${ANSI.RESET} - Switch theme (amber, green, cyan, red, white)
-  ${ANSI.CYAN}/time          ${ANSI.RESET} - Display local time
-  ${ANSI.CYAN}/list users    ${ANSI.RESET} - List all historical users & status
-  ${ANSI.CYAN}/calc <math>   ${ANSI.RESET} - Evaluate a math expression
+  ${ANSI.CYAN}/color <name>  ${ANSI.RESET} - Switch theme
+  ${ANSI.CYAN}/list users    ${ANSI.RESET} - List all historical users & roles
   ${ANSI.CYAN}/ciallo        ${ANSI.RESET} - Send Ciallo～(∠・ω< )⌒★
   ${ANSI.CYAN}/clear         ${ANSI.RESET} - Clear screen
-  ${ANSI.CYAN}/status        ${ANSI.RESET} - Connection details
   ${ANSI.CYAN}/exit          ${ANSI.RESET} - Disconnect
+  ${ANSI.CYAN}/admin <key>   ${ANSI.RESET} - Claim admin privileges
+  ${ANSI.CYAN}/op <user>     ${ANSI.RESET} - Grant admin privileges
+  ${ANSI.CYAN}/deop <user>   ${ANSI.RESET} - Revoke admin privileges
 `, 'command_output');
         return true;
 
@@ -173,40 +173,8 @@ ${ANSI.WHITE}Available Commands:${ANSI.RESET}
         }
         return true;
 
-      case '/time':
-        addSystemMessage(`Current Local Time: ${new Date().toString()}`);
-        return true;
-
-      case '/calc':
-         try {
-             const expression = args.slice(1).join('');
-             // Safety: Basic validation
-             if (!/^[0-9+\-*/().\s]+$/.test(expression)) {
-                 addSystemMessage('Invalid characters in expression.', 'error');
-                 return true;
-             }
-             // eslint-disable-next-line no-new-func
-             const result = new Function(`return ${expression}`)();
-             addSystemMessage(`${expression} = ${result}`, 'command_output');
-         } catch(e) {
-             addSystemMessage('Calculation error.', 'error');
-         }
-         return true;
-
       case '/ciallo':
          return handleSendMessage('Ciallo～(∠・ω< )⌒★');
-
-      case '/status':
-         addSystemMessage(`
-${ANSI.WHITE}STATUS REPORT:${ANSI.RESET}
-----------------
-Connection: ${status}
-Username:   ${username}
-Theme:      ${currentTheme.toUpperCase()}
-Uptime:     ${(performance.now() / 1000).toFixed(1)}s
-Protocol:   HTTP/SSE
-         `, 'command_output');
-         return true;
 
       case '/connect':
         if (args.length < 2) {
@@ -249,6 +217,40 @@ Protocol:   HTTP/SSE
         addSystemMessage('Disconnected.');
         return true;
 
+      case '/admin':
+        if (!args[1]) {
+            addSystemMessage('Usage: /admin <secret_key>', 'error');
+            return true;
+        }
+        if (status !== ConnectionStatus.CONNECTED) {
+            addSystemMessage('Not connected to server.', 'error');
+            return true;
+        }
+        try {
+            await socketService.sendCommand('cmd_admin', { secret: args[1] });
+        } catch(e) {
+            addSystemMessage(`Command failed: ${e}`, 'error');
+        }
+        return true;
+
+      case '/op':
+        if (!args[1]) {
+            addSystemMessage('Usage: /op <username>', 'error');
+            return true;
+        }
+        if (status !== ConnectionStatus.CONNECTED) return true;
+        await socketService.sendCommand('cmd_op', { targetUser: args[1] });
+        return true;
+
+      case '/deop':
+        if (!args[1]) {
+            addSystemMessage('Usage: /deop <username>', 'error');
+            return true;
+        }
+        if (status !== ConnectionStatus.CONNECTED) return true;
+        await socketService.sendCommand('cmd_deop', { targetUser: args[1] });
+        return true;
+
       default:
         addSystemMessage(`Unknown command: ${mainCmd}. Type /help for list.`, 'error');
         return true; 
@@ -279,7 +281,7 @@ Protocol:   HTTP/SSE
   return (
     <div className="flex flex-col h-screen w-screen bg-black text-theme">
       <div className="h-6 bg-[#111] border-b border-[#333] flex justify-between items-center px-4 text-xs select-none relative z-10">
-        <span>TERM-CHAT v2.5.0</span>
+        <span>TERM-CHAT v3.0.0</span>
         <div className="flex items-center gap-2">
            <span>{username} @</span>
            <span className={`font-bold ${

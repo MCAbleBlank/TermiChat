@@ -10,6 +10,13 @@ const formatTime = (date: Date) => {
   return date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
+const RoleBadge = ({ role }: { role?: string }) => {
+    if (role === 'admin') {
+        return <span className="text-red-500 font-bold mr-1">[ADMIN]</span>;
+    }
+    return null;
+};
+
 const MessageList: React.FC<MessageListProps> = ({ messages }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -28,9 +35,12 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
 
           {/* User Prefix */}
           {msg.type !== 'system' && msg.type !== 'error' && (
-            <span className={`mr-2 font-bold ${msg.userId === 'currentUser' ? 'text-theme opacity-80' : 'text-theme'}`}>
-              &lt;{msg.username}&gt;
-            </span>
+            <>
+                <RoleBadge role={msg.role} />
+                <span className={`mr-2 font-bold ${msg.userId === 'currentUser' ? 'text-theme opacity-80' : 'text-theme'}`}>
+                  &lt;{msg.username}&gt;
+                </span>
+            </>
           )}
 
           {/* System/Error Prefixes */}

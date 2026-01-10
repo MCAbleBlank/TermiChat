@@ -17,6 +17,7 @@
  * @typedef {Object} UserInfo
  * @property {'online'|'offline'} status
  * @property {string} lastSeen
+ * @property {'admin'|'user'} [role]
  */
 
 /**
@@ -30,10 +31,25 @@ let MEMORY_USER_REGISTRY = {};
 
 const REGISTRY_KEY = 'user_registry';
 
-// Track active SSE sessions
+// Track active SSE sessions locally
 // Map<clientId, ClientSession>
 /** @type {Map<string, ClientSession>} */
 const CLIENTS = new Map();
+
+// BroadcastChannel for syncing messages across worker instances (if supported by runtime)
+// This fixes the "Split Brain" issue where POST requests hit a different instance than the SSE connection.
+let channel;
+try {
+  if (typeof BroadcastChannel !== 'undefined') {
+    channel = new BroadcastChannel('termichat_global_sync');
+    channel.onmessage = (event) => {
+      // When we receive a message from another instance, send it to our local clients
+      broadcastToLocalClients(event.data);
+    };
+  }
+} catch (e) {
+  console.warn("BroadcastChannel not supported in this environment.");
+}
 
 export default {
   async fetch(request, env) {
@@ -55,15 +71,10 @@ export default {
       const clientId = url.searchParams.get("clientId");
       if (!clientId) return new Response("Missing clientId", { status: 400 });
 
-      const { readable, writable } = new TransformStream();
-      const writer = writable.getWriter();
-      const encoder = new TextEncoder();
-
-      // Create a managed stream source
       const stream = new ReadableStream({
         start(controller) {
-          // Heartbeat to keep connection alive (prevent Cloudflare/Browser timeout)
-          // SSE comments start with colon
+          // Heartbeat to keep connection alive
+          // SSE comments start with colon. Sending frequently prevents timeouts.
           const intervalId = setInterval(() => {
              try {
                  const enc = new TextEncoder();
@@ -71,7 +82,7 @@ export default {
              } catch(e) {
                  clearInterval(intervalId);
              }
-          }, 15000);
+          }, 10000);
 
           // Register client
           CLIENTS.set(clientId, {
@@ -105,6 +116,7 @@ export default {
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
           "Access-Control-Allow-Origin": "*",
+          "X-Accel-Buffering": "no", // Disable buffering for Nginx/Proxies
         },
       });
     }
@@ -115,12 +127,18 @@ export default {
         const body = await request.json();
         await handleAction(body, env);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { "Access-Control-Allow-Origin": "*" }
+          headers: { 
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json"
+          }
         });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), {
           status: 500,
-          headers: { "Access-Control-Allow-Origin": "*" }
+          headers: { 
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json"
+          }
         });
       }
     }
@@ -140,6 +158,7 @@ function sendSSE(controller, data) {
     controller.enqueue(encoder.encode(payload));
   } catch (e) {
     // Controller might be closed
+    console.error("Failed to send SSE:", e);
   }
 }
 
@@ -147,86 +166,127 @@ function sendSSE(controller, data) {
  * Handle incoming POST actions
  */
 async function handleAction(data, env) {
-  const { clientId, type, content, username } = data;
-  const session = CLIENTS.get(clientId);
+  const { clientId, type, content, username, secret, targetUser } = data;
+  
+  let session = CLIENTS.get(clientId);
+
+  const hasKV = !!env.CHAT_KV;
+  // Always fetch fresh registry for permission checks
+  const registry = await getUserRegistry(env, hasKV);
 
   // Allow 'join' to set username even if session exists, or update it
-  if (type === 'join' && session) {
-    session.username = username || 'Anonymous';
-    
-    // Check if there are other active sessions for this user (Multi-tab)
-    const otherSessions = Array.from(CLIENTS.values()).filter(s => s.username === session.username && s.clientId !== clientId);
-    const hasOtherSessions = otherSessions.length > 0;
+  if (type === 'join') {
+    // If session is local, update it
+    if (session) {
+        session.username = username || 'Anonymous';
+    }
 
-    // Check registry for recent activity to detect refresh
-    const reg = await getUserRegistry(env, !!env.CHAT_KV);
-    const userReg = reg[session.username];
+    const userReg = registry[username];
     let isQuickReconnect = false;
     
-    if (userReg && userReg.status === 'online') {
-        const lastSeen = new Date(userReg.lastSeen).getTime();
-        // If seen within last 10 seconds, assume quick reconnect/refresh
-        if (Date.now() - lastSeen < 10000) {
-            isQuickReconnect = true;
+    // Default role if not exists
+    let role = 'user';
+
+    if (userReg) {
+        role = userReg.role || 'user';
+        if (userReg.status === 'online') {
+            const lastSeen = new Date(userReg.lastSeen).getTime();
+            if (Date.now() - lastSeen < 10000) {
+                isQuickReconnect = true;
+            }
         }
     }
 
     // Update registry
-    await updateUserRegistry(env, session.username, 'online', !!env.CHAT_KV);
-    broadcastUserList();
+    await updateUserRegistry(env, username, { status: 'online', role }, hasKV);
+    
+    // Broadcast updates
+    broadcastUserList(env, hasKV);
 
-    // Broadcast "Joined" ONLY if:
-    // 1. Not a multi-tab instance
-    // 2. Not a quick reconnect (refresh)
-    if (!hasOtherSessions && !isQuickReconnect) {
+    if (!isQuickReconnect) {
         const joinMsg = {
           type: 'system',
           id: `sys-join-${Date.now()}-${Math.random().toString(36).substr(2)}`,
-          content: `${session.username} joined the channel.`,
+          content: `${username} joined the channel.`,
           timestamp: new Date().toISOString()
         };
-        broadcast(joinMsg);
-        // Do not save join messages to history
+        broadcastGlobal(joinMsg);
     }
-    
     return;
   }
 
-  // For other commands, require session
-  if (!session) return; 
+  // Identify sender's role
+  const senderName = username || (session ? session.username : 'Anonymous');
+  const senderInfo = registry[senderName];
+  const senderRole = senderInfo ? (senderInfo.role || 'user') : 'user';
 
   if (type === 'chat') {
-    // Server generates ID for consistency across clients
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const chatMsg = {
       type: 'chat',
       id: msgId,
-      username: session.username,
-      userId: session.username, 
+      username: senderName,
+      userId: senderName,
+      role: senderRole,
       content: content,
       timestamp: new Date().toISOString()
     };
-    broadcast(chatMsg);
-    await appendToHistory(env, chatMsg, !!env.CHAT_KV);
+    
+    broadcastGlobal(chatMsg);
+    await appendToHistory(env, chatMsg, hasKV);
   
+  } else if (type === 'cmd_admin') {
+      // Claim admin
+      // Check secret against Env Var or hardcoded fallback
+      const serverSecret = env.ADMIN_SECRET || 'secret123';
+      if (secret === serverSecret) {
+          await updateUserRegistry(env, senderName, { role: 'admin' }, hasKV);
+          sendPrivateSystem(session, `Admin privileges granted to ${senderName}.`);
+          broadcastUserList(env, hasKV);
+      } else {
+          sendPrivateSystem(session, `Invalid admin secret.`);
+      }
+
+  } else if (type === 'cmd_op') {
+      if (senderRole !== 'admin') {
+          sendPrivateSystem(session, `Permission denied. You are not an admin.`);
+          return;
+      }
+      if (targetUser && registry[targetUser]) {
+          await updateUserRegistry(env, targetUser, { role: 'admin' }, hasKV);
+          sendPrivateSystem(session, `User ${targetUser} promoted to Admin.`);
+          broadcastGlobal({ type: 'system', content: `SERVER: ${targetUser} was promoted to Admin by ${senderName}.` });
+          broadcastUserList(env, hasKV);
+      } else {
+          sendPrivateSystem(session, `User ${targetUser} not found in registry.`);
+      }
+
+  } else if (type === 'cmd_deop') {
+      if (senderRole !== 'admin') {
+          sendPrivateSystem(session, `Permission denied. You are not an admin.`);
+          return;
+      }
+      if (targetUser && registry[targetUser]) {
+          await updateUserRegistry(env, targetUser, { role: 'user' }, hasKV);
+          sendPrivateSystem(session, `User ${targetUser} demoted to User.`);
+          broadcastGlobal({ type: 'system', content: `SERVER: ${targetUser} was demoted by ${senderName}.` });
+          broadcastUserList(env, hasKV);
+      } else {
+          sendPrivateSystem(session, `User ${targetUser} not found in registry.`);
+      }
+
   } else if (type === 'cmd_list_users') {
-     try {
-        const hasKV = !!env.CHAT_KV;
-        /** @type {UserRegistry} */
-        const registry = (await getUserRegistry(env, hasKV)) || {};
-        
-        // Send ONLY to the requester
-        sendSSE(session.controller, {
-            type: 'cmd_result_list_users',
-            registry: registry,
-            timestamp: new Date().toISOString()
-        });
-    } catch (err) {
-        sendSSE(session.controller, {
-            type: 'error',
-            content: `Failed to retrieve user list.`
-        });
-    }
+     if (session) {
+         try {
+            sendSSE(session.controller, {
+                type: 'cmd_result_list_users',
+                registry: registry,
+                timestamp: new Date().toISOString()
+            });
+        } catch (err) {
+            sendSSE(session.controller, { type: 'error', content: `Failed to retrieve user list.` });
+        }
+     }
   }
 }
 
@@ -238,24 +298,12 @@ async function handleDisconnect(clientId, env) {
     const username = session.username;
     
     if (username !== 'Anonymous') {
-        // 1. Check if user still has OTHER active sessions immediately
-        const isStillOnline = Array.from(CLIENTS.values()).some(s => s.username === username);
-        
-        if (isStillOnline) {
-            // Still connected via another tab, just update list silently
-            broadcastUserList();
-            return;
-        }
-
-        // 2. If no sessions, wait a grace period to see if they reconnect (Refresh)
         setTimeout(async () => {
-             // Re-check after 3 seconds
              const currentClients = Array.from(CLIENTS.values());
              const nowOnline = currentClients.some(s => s.username === username);
              
              if (!nowOnline) {
-                 // Confirmed offline
-                 await updateUserRegistry(env, username, 'offline', !!env.CHAT_KV);
+                 await updateUserRegistry(env, username, { status: 'offline' }, !!env.CHAT_KV);
                  
                  const leaveMsg = {
                     type: 'system',
@@ -263,12 +311,12 @@ async function handleDisconnect(clientId, env) {
                     content: `${username} left the channel.`,
                     timestamp: new Date().toISOString()
                 };
-                broadcast(leaveMsg);
-                broadcastUserList();
+                broadcastGlobal(leaveMsg);
+                broadcastUserList(env, !!env.CHAT_KV);
              }
         }, 3000); 
     } else {
-        broadcastUserList();
+        broadcastUserList(env, !!env.CHAT_KV);
     }
   }
 }
@@ -293,42 +341,57 @@ async function sendHistory(controller, env) {
   }
 }
 
-function broadcast(msg) {
+function broadcastGlobal(msg) {
+    if (channel) {
+        channel.postMessage(msg);
+    }
+    broadcastToLocalClients(msg);
+}
+
+function broadcastToLocalClients(msg) {
   for (const session of CLIENTS.values()) {
     sendSSE(session.controller, msg);
   }
 }
 
-function broadcastUserList() {
-    const users = Array.from(CLIENTS.values()).map(s => {
-        return {
-            username: s.username,
-            status: 'online',
-            color: 'white'
-        };
-    });
+function sendPrivateSystem(session, text) {
+    if (session) {
+        sendSSE(session.controller, { type: 'system', content: text });
+    }
+}
+
+// Fixed broadcastUserList to actually fetch registry first if available, 
+// OR just broadcast based on local knowledge merged with what we have.
+// To be accurate, we should just send what we have in registry.
+async function broadcastUserList(env, hasKV) {
+    /** @type {UserRegistry} */
+    const registry = await getUserRegistry(env, hasKV);
+    const onlineUsers = [];
     
-    // Deduplicate users in list (if multiple tabs same user)
-    const uniqueUsers = [];
-    const seen = new Set();
-    for (const u of users) {
-        if (!seen.has(u.username)) {
-            uniqueUsers.push(u);
-            seen.add(u.username);
+    for (const [username, rawInfo] of Object.entries(registry)) {
+        /** @type {UserInfo} */
+        const info = rawInfo;
+        if (info.status === 'online') {
+            onlineUsers.push({
+                username,
+                status: 'online',
+                role: info.role || 'user',
+                color: 'white'
+            });
         }
     }
 
     const msg = {
         type: 'user_list',
-        users: uniqueUsers
+        users: onlineUsers
     };
     
-    broadcast(msg);
+    broadcastGlobal(msg);
 }
 
-// --- Registry & History Helpers (Same as before) ---
+// --- Registry & History Helpers ---
 
-async function updateUserRegistry(env, username, status, hasKV) {
+async function updateUserRegistry(env, username, updates, hasKV) {
     try {
         const now = new Date().toISOString();
         let registry = {};
@@ -342,11 +405,15 @@ async function updateUserRegistry(env, username, status, hasKV) {
 
         if (!registry) registry = {};
 
+        const existing = registry[username] || {};
+        
         registry[username] = {
-            status: status,
+            ...existing,
+            ...updates,
             lastSeen: now
         };
 
+        // Cleanup old offline users if memory
         if (!hasKV) {
              const keys = Object.keys(registry);
              if (keys.length > 100) {
@@ -359,7 +426,7 @@ async function updateUserRegistry(env, username, status, hasKV) {
         } else {
             MEMORY_USER_REGISTRY = registry;
         }
-    } catch(e) { /* ignore */ }
+    } catch(e) { console.error(e); }
 }
 
 async function getUserRegistry(env, hasKV) {

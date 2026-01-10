@@ -2,12 +2,14 @@ export interface User {
   username: string;
   color: string; // ANSI color code or hex equivalent class
   status: 'online' | 'offline';
+  role?: 'admin' | 'user';
 }
 
 export interface Message {
   id: string;
   userId: string;
   username: string;
+  role?: 'admin' | 'user';
   content: string;
   timestamp: Date;
   type: 'system' | 'chat' | 'error' | 'command_output';
@@ -30,11 +32,11 @@ export const AVAILABLE_COMMANDS = [
   { cmd: '/connect', desc: 'Connect to server <url>' },
   { cmd: '/nick', desc: 'Change nickname <name>' },
   { cmd: '/color', desc: 'Change theme <name>' },
-  { cmd: '/time', desc: 'Show local time' },
   { cmd: '/list users', desc: 'List historical users' },
-  { cmd: '/calc', desc: 'Calculate math <expr>' },
   { cmd: '/ciallo', desc: 'Send Ciallo～(∠・ω< )⌒★' },
   { cmd: '/clear', desc: 'Clear screen' },
-  { cmd: '/status', desc: 'Show status' },
   { cmd: '/exit', desc: 'Disconnect' },
+  { cmd: '/admin', desc: '<secret> Claim admin rights' },
+  { cmd: '/op', desc: '<user> Grant admin rights' },
+  { cmd: '/deop', desc: '<user> Revoke admin rights' },
 ];
