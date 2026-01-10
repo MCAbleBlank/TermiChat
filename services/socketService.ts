@@ -17,10 +17,20 @@ class SocketService {
   private remoteBaseUrl: string | null = null;
   private username: string = 'GuestUser';
   private clientId: string = '';
+  
+  // Heartbeat
+  private heartbeatInterval: number | null = null;
 
   constructor() {
     // Initial ID
     this.clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+    
+    // Bind unload to send leave signal
+    if (typeof window !== 'undefined') {
+        window.addEventListener('beforeunload', () => {
+            this.sendLeaveRequest();
+        });
+    }
   }
 
   /**
@@ -44,6 +54,7 @@ class SocketService {
     // Normalize URL
     let httpUrl = url.trim();
     
+    //kv
     // Remove WebSocket protocols if user copy-pasted them
     if (httpUrl.startsWith('ws://')) httpUrl = httpUrl.replace('ws://', 'http://');
     else if (httpUrl.startsWith('wss://')) httpUrl = httpUrl.replace('wss://', 'https://');
@@ -81,6 +92,9 @@ class SocketService {
           username: this.username,
           color: ANSI.CYAN
         });
+
+        // Start Heartbeat
+        this.startHeartbeat();
       };
 
       es.onmessage = (event) => {
@@ -100,6 +114,7 @@ class SocketService {
         // However, if the initial connection fails (e.g. invalid URL, 404), readyState becomes CLOSED.
         if (es.readyState === EventSource.CLOSED) {
             this.updateStatus(ConnectionStatus.DISCONNECTED);
+            this.stopHeartbeat();
             this.receiveSystemMessage(`Connection failed to ${this.remoteBaseUrl}. Please check the URL.`, 'error');
             
             // Close explicitly to stop browser from potentially retrying in background
@@ -113,11 +128,18 @@ class SocketService {
 
     } catch (e) {
       this.updateStatus(ConnectionStatus.DISCONNECTED);
+      this.stopHeartbeat();
       this.receiveSystemMessage(`Could not create connection to ${httpUrl}`, 'error');
     }
   }
 
   disconnect() {
+    this.stopHeartbeat();
+    
+    if (this.status === ConnectionStatus.CONNECTED) {
+        this.sendLeaveRequest();
+    }
+
     if (this.es) {
       this.es.close();
       this.es = null;
@@ -147,6 +169,25 @@ class SocketService {
     });
   }
 
+  // --- Heartbeat ---
+
+  private startHeartbeat() {
+      this.stopHeartbeat();
+      // Send a ping every 30 seconds to keep registry status fresh
+      this.heartbeatInterval = window.setInterval(() => {
+          if (this.status === ConnectionStatus.CONNECTED) {
+              this.postAction({ type: 'ping' }).catch(() => {});
+          }
+      }, 30000);
+  }
+
+  private stopHeartbeat() {
+      if (this.heartbeatInterval) {
+          clearInterval(this.heartbeatInterval);
+          this.heartbeatInterval = null;
+      }
+  }
+
   // --- Internal Helper for Upstream POSTs ---
 
   private async postAction(body: any): Promise<void> {
@@ -160,7 +201,8 @@ class SocketService {
               },
               body: JSON.stringify({
                   ...body,
-                  clientId: this.clientId
+                  clientId: this.clientId,
+                  username: this.username // Always include username
               })
           });
           
@@ -168,8 +210,30 @@ class SocketService {
               throw new Error(`Server error: ${res.status}`);
           }
       } catch (e) {
-          console.error("Action failed:", e);
+          // console.error("Action failed:", e);
           throw e;
+      }
+  }
+
+  private sendLeaveRequest() {
+      if (!this.remoteBaseUrl || !this.clientId) return;
+      
+      const payload = JSON.stringify({
+          type: 'leave',
+          clientId: this.clientId,
+          username: this.username
+      });
+
+      // Try using fetch with keepalive (modern)
+      try {
+          fetch(`${this.remoteBaseUrl}/action`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: payload,
+              keepalive: true
+          }).catch(() => {});
+      } catch (e) {
+          // Fallback or ignore
       }
   }
 

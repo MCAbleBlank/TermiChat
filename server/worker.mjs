@@ -214,6 +214,35 @@ async function handleAction(data, env) {
     }
     return;
   }
+  
+  // Heartbeat/Ping from client to keep registry alive
+  if (type === 'ping') {
+      if (username && username !== 'Anonymous') {
+          // Just update timestamp, no broadcast
+          await updateUserRegistry(env, username, { status: 'online' }, hasKV);
+      }
+      return;
+  }
+
+  // Active Leave
+  if (type === 'leave') {
+      if (username && username !== 'Anonymous') {
+          await updateUserRegistry(env, username, { status: 'offline' }, hasKV);
+          const leaveMsg = {
+                type: 'system',
+                id: `sys-leave-${Date.now()}-${Math.random().toString(36).substr(2)}`,
+                content: `${username} left the channel.`,
+                timestamp: new Date().toISOString()
+          };
+          broadcastGlobal(leaveMsg);
+          broadcastUserList(env, hasKV);
+      }
+      // We also clean up local session if it exists on this instance
+      if (session) {
+          CLIENTS.delete(clientId);
+      }
+      return;
+  }
 
   // Identify sender's role
   const senderName = username || (session ? session.username : 'Anonymous');
@@ -299,22 +328,32 @@ async function handleDisconnect(clientId, env) {
     
     if (username !== 'Anonymous') {
         setTimeout(async () => {
-             const currentClients = Array.from(CLIENTS.values());
-             const nowOnline = currentClients.some(s => s.username === username);
+             // Passive cleanup check (fallback if explicit 'leave' wasn't received)
+             // We check if the user has updated their registry status recently.
+             const hasKV = !!env.CHAT_KV;
+             const registry = await getUserRegistry(env, hasKV);
+             const userReg = registry[username];
              
-             if (!nowOnline) {
-                 await updateUserRegistry(env, username, { status: 'offline' }, !!env.CHAT_KV);
+             if (userReg && userReg.status === 'online') {
+                 // Check if lastSeen is older than 45 seconds (30s heartbeat + buffer)
+                 const lastSeen = new Date(userReg.lastSeen).getTime();
+                 const timeDiff = Date.now() - lastSeen;
                  
-                 const leaveMsg = {
-                    type: 'system',
-                    id: `sys-leave-${Date.now()}-${Math.random().toString(36).substr(2)}`,
-                    content: `${username} left the channel.`,
-                    timestamp: new Date().toISOString()
-                };
-                broadcastGlobal(leaveMsg);
-                broadcastUserList(env, !!env.CHAT_KV);
+                 // If silent for > 45s, mark offline
+                 if (timeDiff > 45000) {
+                     await updateUserRegistry(env, username, { status: 'offline' }, hasKV);
+                     
+                     const leaveMsg = {
+                        type: 'system',
+                        id: `sys-leave-${Date.now()}-${Math.random().toString(36).substr(2)}`,
+                        content: `${username} left the channel (timeout).`,
+                        timestamp: new Date().toISOString()
+                    };
+                    broadcastGlobal(leaveMsg);
+                    broadcastUserList(env, hasKV);
+                 }
              }
-        }, 3000); 
+        }, 5000); 
     } else {
         broadcastUserList(env, !!env.CHAT_KV);
     }
@@ -371,7 +410,11 @@ async function broadcastUserList(env, hasKV) {
     for (const [username, rawInfo] of Object.entries(registry)) {
         /** @type {UserInfo} */
         const info = rawInfo;
-        if (info.status === 'online') {
+        // Basic timeout check for list generation (if > 60s silent, treat as offline even if reg says online)
+        const lastSeen = new Date(info.lastSeen).getTime();
+        const isActuallyOnline = (Date.now() - lastSeen) < 60000;
+
+        if (info.status === 'online' && isActuallyOnline) {
             onlineUsers.push({
                 username,
                 status: 'online',
