@@ -154,18 +154,40 @@ async function handleAction(data, env) {
   if (type === 'join' && session) {
     session.username = username || 'Anonymous';
     
+    // Check if there are other active sessions for this user (Multi-tab)
+    const otherSessions = Array.from(CLIENTS.values()).filter(s => s.username === session.username && s.clientId !== clientId);
+    const hasOtherSessions = otherSessions.length > 0;
+
+    // Check registry for recent activity to detect refresh
+    const reg = await getUserRegistry(env, !!env.CHAT_KV);
+    const userReg = reg[session.username];
+    let isQuickReconnect = false;
+    
+    if (userReg && userReg.status === 'online') {
+        const lastSeen = new Date(userReg.lastSeen).getTime();
+        // If seen within last 10 seconds, assume quick reconnect/refresh
+        if (Date.now() - lastSeen < 10000) {
+            isQuickReconnect = true;
+        }
+    }
+
+    // Update registry
     await updateUserRegistry(env, session.username, 'online', !!env.CHAT_KV);
     broadcastUserList();
 
-    const joinMsg = {
-      type: 'system',
-      content: `${session.username} joined the channel.`,
-      timestamp: new Date().toISOString()
-    };
-    broadcast(joinMsg);
-    
-    // NOTE: We do NOT save 'join' messages to history anymore to avoid clutter.
-    // await appendToHistory(env, joinMsg, !!env.CHAT_KV); 
+    // Broadcast "Joined" ONLY if:
+    // 1. Not a multi-tab instance
+    // 2. Not a quick reconnect (refresh)
+    if (!hasOtherSessions && !isQuickReconnect) {
+        const joinMsg = {
+          type: 'system',
+          id: `sys-join-${Date.now()}-${Math.random().toString(36).substr(2)}`,
+          content: `${session.username} joined the channel.`,
+          timestamp: new Date().toISOString()
+        };
+        broadcast(joinMsg);
+        // Do not save join messages to history
+    }
     
     return;
   }
@@ -174,13 +196,13 @@ async function handleAction(data, env) {
   if (!session) return; 
 
   if (type === 'chat') {
-    // Note: We broadcast to ALL clients including the sender.
-    // The client-side is expected NOT to optimistically add the message,
-    // but to wait for this echoed message to display it.
+    // Server generates ID for consistency across clients
+    const msgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const chatMsg = {
       type: 'chat',
+      id: msgId,
       username: session.username,
-      userId: session.username, // Using username as ID for simplicity
+      userId: session.username, 
       content: content,
       timestamp: new Date().toISOString()
     };
@@ -214,24 +236,40 @@ async function handleDisconnect(clientId, env) {
     CLIENTS.delete(clientId);
     
     const username = session.username;
-    // Only mark offline if no other sessions exist for this username
-    // (Handles case where user refreshes page quickly or has multiple tabs)
+    
     if (username !== 'Anonymous') {
+        // 1. Check if user still has OTHER active sessions immediately
         const isStillOnline = Array.from(CLIENTS.values()).some(s => s.username === username);
         
-        if (!isStillOnline) {
-            await updateUserRegistry(env, username, 'offline', !!env.CHAT_KV);
-            
-            // Broadcast leave message so everyone knows they left
-            const leaveMsg = {
-                type: 'system',
-                content: `${username} left the channel.`,
-                timestamp: new Date().toISOString()
-            };
-            broadcast(leaveMsg);
+        if (isStillOnline) {
+            // Still connected via another tab, just update list silently
+            broadcastUserList();
+            return;
         }
+
+        // 2. If no sessions, wait a grace period to see if they reconnect (Refresh)
+        setTimeout(async () => {
+             // Re-check after 3 seconds
+             const currentClients = Array.from(CLIENTS.values());
+             const nowOnline = currentClients.some(s => s.username === username);
+             
+             if (!nowOnline) {
+                 // Confirmed offline
+                 await updateUserRegistry(env, username, 'offline', !!env.CHAT_KV);
+                 
+                 const leaveMsg = {
+                    type: 'system',
+                    id: `sys-leave-${Date.now()}-${Math.random().toString(36).substr(2)}`,
+                    content: `${username} left the channel.`,
+                    timestamp: new Date().toISOString()
+                };
+                broadcast(leaveMsg);
+                broadcastUserList();
+             }
+        }, 3000); 
+    } else {
+        broadcastUserList();
     }
-    broadcastUserList();
   }
 }
 

@@ -192,7 +192,7 @@ class SocketService {
     if (this.messageHandler) {
         // Map server message to UI Message type
         const msg: Message = {
-            id: Date.now().toString() + Math.random(),
+            id: data.id || (Date.now().toString() + Math.random()), // Use Server ID if available
             userId: data.userId || 'system',
             username: data.username || 'SYSTEM',
             content: data.content,
