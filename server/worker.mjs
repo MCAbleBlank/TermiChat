@@ -62,15 +62,9 @@ export default {
       // Create a managed stream source
       const stream = new ReadableStream({
         start(controller) {
-          // Heartbeat to keep connection alive (prevent Cloudflare/Browser timeout)
-          // SSE comments start with colon
+          // Heartbeat to keep connection alive
           const intervalId = setInterval(() => {
-             try {
-                 const enc = new TextEncoder();
-                 controller.enqueue(enc.encode(": keepalive\n\n"));
-             } catch(e) {
-                 clearInterval(intervalId);
-             }
+            sendSSE(controller, { type: 'ping' }, 'ping');
           }, 15000);
 
           // Register client
@@ -105,6 +99,8 @@ export default {
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
           "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
         },
       });
     }
@@ -131,15 +127,18 @@ export default {
 
 /**
  * Send a message via SSE format
+ * event: [event_name]
  * data: JSON_STRING\n\n
  */
-function sendSSE(controller, data) {
+function sendSSE(controller, data, event = 'message') {
   try {
-    const payload = `data: ${JSON.stringify(data)}\n\n`;
+    let payload = `event: ${event}\n`;
+    payload += `data: ${JSON.stringify(data)}\n\n`;
     const encoder = new TextEncoder();
     controller.enqueue(encoder.encode(payload));
   } catch (e) {
     // Controller might be closed
+    console.warn(`SSE send error: ${e.message}`);
   }
 }
 
@@ -185,7 +184,7 @@ async function handleAction(data, env) {
           content: `${session.username} joined the channel.`,
           timestamp: new Date().toISOString()
         };
-        broadcast(joinMsg);
+        broadcast(joinMsg, 'message');
         // Do not save join messages to history
     }
     
@@ -263,7 +262,7 @@ async function handleDisconnect(clientId, env) {
                     content: `${username} left the channel.`,
                     timestamp: new Date().toISOString()
                 };
-                broadcast(leaveMsg);
+                broadcast(leaveMsg, 'message');
                 broadcastUserList();
              }
         }, 3000); 
@@ -293,9 +292,14 @@ async function sendHistory(controller, env) {
   }
 }
 
-function broadcast(msg) {
+function broadcast(msg, event = 'message') {
   for (const session of CLIENTS.values()) {
-    sendSSE(session.controller, msg);
+    try {
+      sendSSE(session.controller, msg, event);
+    } catch (e) {
+      console.warn(`Failed to broadcast to client ${session.clientId}: ${e.message}`);
+      // Optional: Clean up this specific client if broadcast fails repeatedly
+    }
   }
 }
 
@@ -323,7 +327,7 @@ function broadcastUserList() {
         users: uniqueUsers
     };
     
-    broadcast(msg);
+    broadcast(msg, 'user_list');
 }
 
 // --- Registry & History Helpers (Same as before) ---

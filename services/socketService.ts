@@ -83,15 +83,18 @@ class SocketService {
         });
       };
 
-      es.onmessage = (event) => {
+      const handleEvent = (event) => {
         if (this.es !== es) return;
         try {
           const data = JSON.parse(event.data);
           this.handleRemoteMessage(data);
         } catch (e) {
-          // Ignore parse errors
+          console.warn('SSE parse error:', e);
         }
       };
+
+      es.addEventListener('message', handleEvent);
+      es.addEventListener('user_list', handleEvent);
 
       es.onerror = (e) => {
         if (this.es !== es) return;
