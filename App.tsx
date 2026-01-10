@@ -61,32 +61,53 @@ const App: React.FC = () => {
     // Set default theme
     document.documentElement.style.setProperty('--terminal-color', THEMES['white']);
 
-    // Initial Welcome Message
-    const welcomeMsg: Message = {
-      id: 'welcome-msg',
-      userId: 'system',
-      username: 'SYSTEM',
-      content: `
+    // Boot Sequence
+    const runBootSequence = async () => {
+        const bootSteps = [
+            `INITIALIZING TERM-CHAT KERNEL v2.5.0...`,
+            `LOADING MEMORY MODULES... [OK]`,
+            `MOUNTING VIRTUAL FILE SYSTEM... [OK]`,
+            `CHECKING NETWORK INTERFACES... [OK]`,
+            `LOADING USER PROFILE: ${ANSI.YELLOW}${localStorage.getItem('termichat_username') || 'GUEST'}${ANSI.RESET}... [OK]`,
+        ];
+
+        for (const step of bootSteps) {
+            handleIncomingMessage({
+                id: `boot-${Date.now()}-${Math.random()}`,
+                userId: 'system',
+                username: 'SYSTEM',
+                content: step,
+                timestamp: new Date(),
+                type: 'system'
+            });
+            await new Promise(r => setTimeout(r, 400));
+        }
+
+        // Welcome Message
+        const welcomeMsg: Message = {
+            id: 'welcome-msg',
+            userId: 'system',
+            username: 'SYSTEM',
+            content: `
 ${ANSI.GREEN}Welcome to TermiChat v2.5.0${ANSI.RESET}
 ${ANSI.WHITE}---------------------------${ANSI.RESET}
 Client initialized.
-Logged in as: ${ANSI.YELLOW}${username}${ANSI.RESET}
+Logged in as: ${ANSI.YELLOW}${localStorage.getItem('termichat_username') || 'User_????'}${ANSI.RESET}
 
 Type ${ANSI.CYAN}/help${ANSI.RESET} to see available commands.
 `,
-      timestamp: new Date(),
-      type: 'system'
+            timestamp: new Date(),
+            type: 'system'
+        };
+        handleIncomingMessage(welcomeMsg);
     };
     
-    // Use a timeout to ensure it renders after mount
-    setTimeout(() => {
-        setMessages([welcomeMsg]);
-    }, 100);
+    runBootSequence();
 
     return () => {
       socketService.disconnect();
     };
-  }, []); // Run once
+  }, [handleIncomingMessage]); // Run once
 
   // Handle Theme Change
   useEffect(() => {
@@ -257,7 +278,7 @@ Protocol:   HTTP/SSE
 
   return (
     <div className="flex flex-col h-screen w-screen bg-black text-theme">
-      <div className="h-6 bg-[#111] border-b border-[#333] flex justify-between items-center px-4 text-xs select-none">
+      <div className="h-6 bg-[#111] border-b border-[#333] flex justify-between items-center px-4 text-xs select-none relative z-10">
         <span>TERM-CHAT v2.5.0</span>
         <div className="flex items-center gap-2">
            <span>{username} @</span>
@@ -270,17 +291,18 @@ Protocol:   HTTP/SSE
         </div>
       </div>
 
-      <div className="flex-grow flex flex-col min-h-0 relative">
+      <div className="flex-grow flex flex-col min-h-0 relative z-0">
         <MessageList messages={messages} />
       </div>
 
-      <div className="h-1/4 min-h-[150px]">
+      <div className="h-1/4 min-h-[150px] relative z-10">
         <InputArea 
           onSendMessage={handleSendMessage} 
           disabled={false}
           history={commandHistory}
           knownUsers={users}
           status={status}
+          username={username}
         />
       </div>
     </div>

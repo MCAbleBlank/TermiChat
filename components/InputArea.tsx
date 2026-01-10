@@ -7,11 +7,12 @@ interface InputAreaProps {
   history: string[]; // Command history
   knownUsers: User[];
   status: ConnectionStatus;
+  username: string;
 }
 
 const MAX_RETRIES = 3;
 
-const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history, knownUsers, status }) => {
+const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history, knownUsers, status, username }) => {
   const [inputValue, setInputValue] = useState('');
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [tempInput, setTempInput] = useState(''); // Stores input before navigating history
@@ -171,7 +172,9 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
       )}
 
       <div className="flex flex-row items-center w-full h-full">
-        <span className="text-theme mr-2 select-none font-bold animate-pulse">{">"}</span>
+        <span className="text-theme mr-2 select-none font-bold whitespace-nowrap">
+            {username}@termichat:~$
+        </span>
         <input
           ref={inputRef}
           type="text"

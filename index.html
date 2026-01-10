@@ -19,6 +19,7 @@
         color: var(--terminal-color);
         font-family: 'Fira Code', 'Courier New', monospace;
         overflow: hidden;
+        margin: 0;
       }
 
       /* Helper class for React components to bind to the variable */
@@ -45,11 +46,11 @@
         border: 1px solid var(--terminal-color);
       }
 
-      /* CRT Effect (Static Glow only, no flicker) */
+      /* CRT Text Glow Effect - Kept as it adds to the terminal aesthetic without being an overlay */
       .crt-effect {
         text-shadow: 0 0 2px var(--terminal-color);
       }
-      
+
       /* Blinking Cursor */
       .blinking-cursor::after {
         content: '█';
