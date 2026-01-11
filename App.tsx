@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [currentTime, setCurrentTime] = useState(new Date());
   
   // Initialize Username from LocalStorage or Random
   const [username, setUsername] = useState(() => {
@@ -31,6 +32,12 @@ const App: React.FC = () => {
   
   const [currentTheme, setCurrentTheme] = useState('white');
   
+  // Update time every second
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Handlers for socket events
   const handleStatusChange = useCallback((newStatus: ConnectionStatus) => {
     setStatus(newStatus);
@@ -278,26 +285,52 @@ ${ANSI.WHITE}Available Commands:${ANSI.RESET}
     }
   };
 
+  const currentUserRole = users.find(u => u.username === username)?.role || 'user';
+
   return (
-    <div className="flex flex-col h-screen w-screen bg-black text-theme">
-      <div className="h-6 bg-[#111] border-b border-[#333] flex justify-between items-center px-4 text-xs select-none relative z-10">
-        <span>TERM-CHAT v3.0.0</span>
-        <div className="flex items-center gap-2">
-           <span>{username} @</span>
-           <span className={`font-bold ${
-             status === ConnectionStatus.CONNECTED ? 'text-green-500' : 
-             status === ConnectionStatus.RECONNECTING ? 'text-yellow-500' : 'text-red-500'
-           }`}>
-             {status}
-           </span>
+    // Use h-[100dvh] (dynamic viewport height) to handle mobile browsers where address bar shrinks the view
+    <div className="flex flex-col h-[100dvh] w-screen bg-black text-theme overflow-hidden">
+      
+      {/* Header Bar */}
+      <div className="h-8 min-h-[32px] bg-[#111] border-b border-[#333] flex justify-between items-center px-2 md:px-4 text-[10px] md:text-xs select-none relative z-10 shrink-0">
+        <span className="font-bold hidden sm:inline">TERM-CHAT v3.0.0</span>
+        <span className="font-bold sm:hidden">TC v3</span>
+        
+        <div className="flex items-center gap-2 md:gap-4">
+            {/* Time: Hide on very small screens if needed, or keep compact */}
+            <span className="text-gray-500 font-mono hidden xs:inline">
+                {currentTime.toLocaleTimeString('en-US', { hour12: false })}
+            </span>
+
+            {/* Role Info */}
+            {status === ConnectionStatus.CONNECTED && (
+                currentUserRole === 'admin' ? (
+                    <span className="text-red-500 font-bold tracking-wider">[ADMIN]</span>
+                ) : (
+                    <span className="text-gray-600 tracking-wider hidden sm:inline">[USER]</span>
+                )
+            )}
+
+            <div className="flex items-center gap-2 max-w-[120px] md:max-w-none overflow-hidden">
+               <span className="truncate">{username} @</span>
+               <span className={`font-bold shrink-0 ${
+                 status === ConnectionStatus.CONNECTED ? 'text-green-500' : 
+                 status === ConnectionStatus.RECONNECTING ? 'text-yellow-500' : 'text-red-500'
+               }`}>
+                 {status === ConnectionStatus.CONNECTED ? 'QN' : 
+                  status === ConnectionStatus.RECONNECTING ? 'RC' : 'KX'}
+               </span>
+            </div>
         </div>
       </div>
 
+      {/* Main Content */}
       <div className="flex-grow flex flex-col min-h-0 relative z-0">
         <MessageList messages={messages} />
       </div>
 
-      <div className="h-1/4 min-h-[150px] relative z-10">
+      {/* Input Area: Height auto to fit content, but with min/max constraints */}
+      <div className="shrink-0 relative z-10 w-full bg-black">
         <InputArea 
           onSendMessage={handleSendMessage} 
           disabled={false}

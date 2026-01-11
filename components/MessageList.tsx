@@ -12,7 +12,7 @@ const formatTime = (date: Date) => {
 
 const RoleBadge = ({ role }: { role?: string }) => {
     if (role === 'admin') {
-        return <span className="text-red-500 font-bold mr-1">[ADMIN]</span>;
+        return <span className="text-red-500 font-bold mr-1">[A]</span>;
     }
     return null;
 };
@@ -27,11 +27,11 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
   }, [messages]);
 
   return (
-    <div className="flex-grow overflow-y-auto p-4 font-mono text-base space-y-1 crt-effect">
+    <div className="flex-grow overflow-y-auto p-2 md:p-4 font-mono text-sm md:text-base space-y-1 crt-effect">
       {messages.map((msg) => (
         <div key={msg.id} className="break-words leading-snug whitespace-pre-wrap">
-          {/* Timestamp */}
-          <span className="text-gray-600 mr-2">[{formatTime(msg.timestamp)}]</span>
+          {/* Timestamp - Smaller on mobile */}
+          <span className="text-gray-600 mr-2 text-xs md:text-sm">[{formatTime(msg.timestamp)}]</span>
 
           {/* User Prefix */}
           {msg.type !== 'system' && msg.type !== 'error' && (
@@ -45,7 +45,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
 
           {/* System/Error Prefixes */}
           {msg.type === 'system' && <span className="text-theme opacity-60 font-bold mr-2">!</span>}
-          {msg.type === 'error' && <span className="text-red-600 font-bold mr-2">ERROR:</span>}
+          {msg.type === 'error' && <span className="text-red-600 font-bold mr-2">ERR:</span>}
 
           {/* Content with ANSI parsing */}
           <span className={msg.type === 'error' ? 'text-red-500' : 'text-theme'}>

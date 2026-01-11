@@ -30,7 +30,8 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
         }
     };
     document.addEventListener('click', keepFocus);
-    inputRef.current?.focus();
+    // Initial focus with a small delay to ensure DOM is ready
+    setTimeout(() => inputRef.current?.focus(), 100);
     return () => document.removeEventListener('click', keepFocus);
   }, []);
 
@@ -157,10 +158,10 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
   };
 
   return (
-    <div className="flex flex-col h-full bg-black border-t-2 border-[#333] p-2 font-mono text-lg relative">
+    <div className="flex flex-col bg-black border-t-2 border-[#333] p-2 font-mono relative">
       {/* Command Suggestions Popup */}
       {commandSuggestions.length > 0 && commandSuggestions.length < 10 && (
-          <div className="absolute bottom-full left-0 mb-2 ml-2 w-auto max-w-md bg-black border border-theme z-50 p-2 shadow-lg">
+          <div className="absolute bottom-full left-0 mb-2 ml-2 w-auto max-w-md bg-black borderQH border-theme z-50 p-2 shadow-lg">
               <div className="text-xs text-gray-500 mb-1 border-b border-gray-800 pb-1">SUGGESTIONS [TAB]</div>
               {commandSuggestions.map((s, idx) => (
                   <div key={idx} className="text-sm">
@@ -171,10 +172,16 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
           </div>
       )}
 
-      <div className="flex flex-row items-center w-full h-full">
-        <span className="text-theme mr-2 select-none font-bold whitespace-nowrap">
+      <div className="flex flex-row items-center w-full">
+        {/* Desktop Prompt */}
+        <span className="text-theme mr-2 select-none font-bold whitespace-nowrap hidden md:inline">
             {username}@termichat:~$
         </span>
+        {/* Mobile Prompt (Shorter) */}
+        <span className="text-theme mr-2 select-none font-bold whitespace-nowrap md:hidden">
+            $
+        </span>
+
         <input
           ref={inputRef}
           type="text"
@@ -182,14 +189,17 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={disabled || isSending}
-          className="flex-grow bg-transparent border-none outline-none text-theme placeholder-gray-700 caret-theme"
           autoComplete="off"
+          autoCapitalize="off" 
+          autoCorrect="off"
+          // text-base prevents iOS zoom on focus, md:text-lg for desktop
+          className="flex-grow bg-transparent border-none outline-none text-theme placeholder-gray-700 caret-theme text-base md:text-lg h-6 md:h-8"
           spellCheck={false}
         />
       </div>
       
-      {/* Visual Helpers / Hints */}
-      <div className="absolute bottom-1 right-2 text-xs text-gray-600 select-none">
+      {/* Visual Helpers / Hints - Hidden on Mobile */}
+      <div className="absolute bottom-1 right-2 text-[10px] text-gray-600 select-none hidden md:block">
         [TAB] Complete | [↑] History | [/] Cmds
       </div>
     </div>

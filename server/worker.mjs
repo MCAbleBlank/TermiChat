@@ -409,7 +409,7 @@ async function broadcastUserList(env, hasKV) {
     
     for (const [username, rawInfo] of Object.entries(registry)) {
         /** @type {UserInfo} */
-        const info = rawInfo;
+        const info = /** @type {any} */ (rawInfo);
         // Basic timeout check for list generation (if > 60s silent, treat as offline even if reg says online)
         const lastSeen = new Date(info.lastSeen).getTime();
         const isActuallyOnline = (Date.now() - lastSeen) < 60000;
@@ -472,6 +472,11 @@ async function updateUserRegistry(env, username, updates, hasKV) {
     } catch(e) { console.error(e); }
 }
 
+/**
+ * @param {any} env
+ * @param {boolean} hasKV
+ * @returns {Promise<UserRegistry>}
+ */
 async function getUserRegistry(env, hasKV) {
     try {
         if (hasKV) {
