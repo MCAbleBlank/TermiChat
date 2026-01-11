@@ -478,12 +478,21 @@ function kickUserByUsername(username) {
 }
 
 async function broadcastUserList(env, hasKV) {
+    /** @type {UserRegistry} */
     const registry = await getUserRegistry(env, hasKV);
     const onlineUsers = [];
     
+    // Explicitly type registry iteration
     for (const [username, rawInfo] of Object.entries(registry)) {
-        /** @type {UserInfo} */
-        const info = /** @type {any} */ (rawInfo);
+        // We verify rawInfo is an object, then cast it.
+        // This prevents Typescript from narrowing to 'object' (empty) via typeof check
+        // when applied to the variable we access.
+        
+        if (!rawInfo || typeof rawInfo !== 'object') continue;
+        
+        const info = /** @type {UserInfo} */ (rawInfo);
+        
+        // info.lastSeen is now safe to access if UserInfo definition is correct
         const lastSeen = new Date(info.lastSeen).getTime();
         const isActuallyOnline = (Date.now() - lastSeen) < 60000;
 
@@ -533,6 +542,9 @@ async function updateUserRegistry(env, username, updates, hasKV) {
     } catch(e) { console.error(e); }
 }
 
+/**
+ * @returns {Promise<UserRegistry>}
+ */
 async function getUserRegistry(env, hasKV) {
     try {
         if (hasKV) {

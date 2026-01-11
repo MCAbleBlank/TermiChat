@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import MessageList from './components/MessageList';
 import InputArea from './components/InputArea';
 import { socketService } from './services/socketService';
-import { Message, ConnectionStatus, User } from './types';
+import { Message, ConnectionStatus, User, AVAILABLE_COMMANDS } from './types';
 import { ANSI } from './utils/ansi';
 
 const THEMES: Record<string, string> = {
@@ -31,6 +31,9 @@ const App: React.FC = () => {
   });
   
   const [currentTheme, setCurrentTheme] = useState('white');
+
+  // Calculated Role
+  const currentUserRole = users.find(u => u.username === username)?.role || 'user';
   
   // Update time every second
   useEffect(() => {
@@ -142,21 +145,12 @@ Type ${ANSI.CYAN}/help${ANSI.RESET} to see available commands.
 
     switch (mainCmd) {
       case '/help':
-        addSystemMessage(`
+        const visibleCommands = AVAILABLE_COMMANDS.filter(c => !c.adminOnly || currentUserRole === 'admin');
+        const helpText = `
 ${ANSI.WHITE}Available Commands:${ANSI.RESET}
-  ${ANSI.CYAN}/connect <url> ${ANSI.RESET} - Connect to HTTP/SSE Server
-  ${ANSI.CYAN}/nick <name>   ${ANSI.RESET} - Change your display name
-  ${ANSI.CYAN}/color <name>  ${ANSI.RESET} - Switch theme
-  ${ANSI.CYAN}/list users    ${ANSI.RESET} - List all historical users & roles
-  ${ANSI.CYAN}/ciallo        ${ANSI.RESET} - Send Ciallo～(∠・ω< )⌒★
-  ${ANSI.CYAN}/clear         ${ANSI.RESET} - Clear screen
-  ${ANSI.CYAN}/exit          ${ANSI.RESET} - Disconnect
-  ${ANSI.CYAN}/admin <key>   ${ANSI.RESET} - Claim admin privileges
-  ${ANSI.CYAN}/op <user>     ${ANSI.RESET} - Grant admin privileges
-  ${ANSI.CYAN}/deop <user>   ${ANSI.RESET} - Revoke admin privileges
-  ${ANSI.CYAN}/ban <user>    ${ANSI.RESET} - Ban a user (Admin)
-  ${ANSI.CYAN}/unban <user>  ${ANSI.RESET} - Unban a user (Admin)
-`, 'command_output');
+${visibleCommands.map(c => `  ${ANSI.CYAN}${c.cmd.padEnd(15)} ${ANSI.RESET} - ${c.desc}`).join('\n')}
+`;
+        addSystemMessage(helpText, 'command_output');
         return true;
 
       case '/nick':
@@ -305,8 +299,6 @@ ${ANSI.WHITE}Available Commands:${ANSI.RESET}
     }
   };
 
-  const currentUserRole = users.find(u => u.username === username)?.role || 'user';
-
   return (
     // Use h-[100dvh] (dynamic viewport height) to handle mobile browsers where address bar shrinks the view
     <div className="flex flex-col h-[100dvh] w-screen bg-black text-theme overflow-hidden">
@@ -358,6 +350,7 @@ ${ANSI.WHITE}Available Commands:${ANSI.RESET}
           knownUsers={users}
           status={status}
           username={username}
+          role={currentUserRole}
         />
       </div>
     </div>

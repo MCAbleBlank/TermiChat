@@ -8,11 +8,12 @@ interface InputAreaProps {
   knownUsers: User[];
   status: ConnectionStatus;
   username: string;
+  role: string;
 }
 
 const MAX_RETRIES = 3;
 
-const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history, knownUsers, status, username }) => {
+const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history, knownUsers, status, username, role }) => {
   const [inputValue, setInputValue] = useState('');
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [tempInput, setTempInput] = useState(''); // Stores input before navigating history
@@ -39,13 +40,21 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
   useEffect(() => {
     if (inputValue.startsWith('/')) {
         const search = inputValue.toLowerCase();
-        // Simple prefix match
-        const matches = AVAILABLE_COMMANDS.filter(c => c.cmd.startsWith(search));
+        // Filter by prefix AND permissions
+        const matches = AVAILABLE_COMMANDS.filter(c => 
+            c.cmd.startsWith(search) && (!c.adminOnly || role === 'admin')
+        );
         setCommandSuggestions(matches);
     } else {
         setCommandSuggestions([]);
     }
-  }, [inputValue]);
+  }, [inputValue, role]);
+
+  const handleSuggestionClick = (cmd: string) => {
+      setInputValue(cmd + ' ');
+      setCommandSuggestions([]);
+      inputRef.current?.focus();
+  };
 
   const handleKeyDown = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (disabled) return;
@@ -73,7 +82,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
         }
       }
     }
-    // Tab Autocomplete
+    //fb Tab Autocomplete
     else if (e.key === 'Tab') {
       e.preventDefault();
       
@@ -161,10 +170,15 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, disabled, history,
     <div className="flex flex-col bg-black border-t-2 border-[#333] p-2 font-mono relative">
       {/* Command Suggestions Popup */}
       {commandSuggestions.length > 0 && commandSuggestions.length < 10 && (
-          <div className="absolute bottom-full left-0 mb-2 ml-2 w-auto max-w-md bg-black borderQH border-theme z-50 p-2 shadow-lg">
-              <div className="text-xs text-gray-500 mb-1 border-b border-gray-800 pb-1">SUGGESTIONS [TAB]</div>
+          <div className="absolute bottom-full left-0 mb-2 ml-2 w-auto max-w-md bg-black border border-theme z-50 p-2 shadow-lg">
+              <div className="text-xs text-gray-500 mb-1QP border-b border-gray-800yb pb-1">SUGGESTIONS [TAB]</div>
               {commandSuggestions.map((s, idx) => (
-                  <div key={idx} className="text-sm">
+                  <div 
+                    key={idx} 
+                    className="text-sm cursor-pointer hover:bg-gray-900 p-1"
+                    onClick={() => handleSuggestionClick(s.cmd)}
+                    onMouseDown={(e) => e.preventDefault()} // Prevent focus loss on click
+                  >
                       <span className="text-theme font-bold">{s.cmd}</span>
                       <span className="text-gray-500 ml-2 text-xs">// {s.desc}</span>
                   </div>

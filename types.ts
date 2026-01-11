@@ -21,13 +21,13 @@ export enum ConnectionStatus {
   RECONNECTING = 'RECONNECTING',
 }
 
-export interface Command {
-  command: string;
-  description: string;
-  action: () => void;
+export interface CommandDef {
+  cmd: string;
+  desc: string;
+  adminOnly?: boolean;
 }
 
-export const AVAILABLE_COMMANDS = [
+export const AVAILABLE_COMMANDS: CommandDef[] = [
   { cmd: '/help', desc: 'Show available commands' },
   { cmd: '/connect', desc: 'Connect to server <url>' },
   { cmd: '/nick', desc: 'Change nickname <name>' },
@@ -37,8 +37,8 @@ export const AVAILABLE_COMMANDS = [
   { cmd: '/clear', desc: 'Clear screen' },
   { cmd: '/exit', desc: 'Disconnect' },
   { cmd: '/admin', desc: '<secret> Claim admin rights' },
-  { cmd: '/op', desc: '<user> Grant admin rights' },
-  { cmd: '/deop', desc: '<user> Revoke admin rights' },
-  { cmd: '/ban', desc: '<user> Ban user from server' },
-  { cmd: '/unban', desc: '<user> Unban user' },
+  { cmd: '/op', desc: '<user> Grant admin rights', adminOnly: true },
+  { cmd: '/deop', desc: '<user> Revoke admin rights', adminOnly: true },
+  { cmd: '/ban', desc: '<user> Ban user from server', adminOnly: true },
+  { cmd: '/unban', desc: '<user> Unban user', adminOnly: true },
 ];
