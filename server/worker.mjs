@@ -17,19 +17,32 @@
  * @typedef {Object} UserInfo
  * @property {'online'|'offline'} status
  * @property {string} lastSeen
- * @property {'admin'|'user'} [role]
+ * @property {'admin'|'user'|'banned'} [role]
+ */
+
+/**
+ * @typedef {Object} UserPermission
+ * @property {'admin'|'user'|'banned'} role
+ * @property {number} [updatedAt]
  */
 
 /**
  * @typedef {Record<string, UserInfo>} UserRegistry
  */
 
+/**
+ * @typedef {Record<string, UserPermission>} PermissionsRegistry
+ */
+
 // In-memory fallback
 const MEMORY_HISTORY = [];
 /** @type {UserRegistry} */
-let MEMORY_USER_REGISTRY = {}; 
+let MEMORY_USER_REGISTRY = {};
+/** @type {PermissionsRegistry} */
+let MEMORY_PERMISSIONS_REGISTRY = {};
 
 const REGISTRY_KEY = 'user_registry';
+const PERMISSIONS_KEY = 'user_permissions'; // New dedicated KV key for permissions
 
 // Track active SSE sessions locally
 // Map<clientId, ClientSession>
@@ -169,13 +182,28 @@ async function handleAction(data, env) {
   const { clientId, type, content, username, secret, targetUser } = data;
   
   let session = CLIENTS.get(clientId);
-
   const hasKV = !!env.CHAT_KV;
-  // Always fetch fresh registry for permission checks
+  
+  // -- Fetch Registries --
+  // We fetch permissions separate from user registry
+  const permissions = await getPermissionsRegistry(env, hasKV);
   const registry = await getUserRegistry(env, hasKV);
 
   // Allow 'join' to set username even if session exists, or update it
   if (type === 'join') {
+    // Check if banned in persistent storage
+    const userPerm = permissions[username];
+    if (userPerm && userPerm.role === 'banned') {
+        if (session) {
+            sendPrivateSystem(session, `ACCESS DENIED: You are banned from this server.`);
+            // Optionally close connection, but simple message is clear enough for now
+        }
+        return;
+    }
+
+    // Determine Role: Persistent Role > Existing Registry Role > 'user'
+    let role = userPerm ? userPerm.role : (registry[username]?.role || 'user');
+
     // If session is local, update it
     if (session) {
         session.username = username || 'Anonymous';
@@ -184,11 +212,7 @@ async function handleAction(data, env) {
     const userReg = registry[username];
     let isQuickReconnect = false;
     
-    // Default role if not exists
-    let role = 'user';
-
     if (userReg) {
-        role = userReg.role || 'user';
         if (userReg.status === 'online') {
             const lastSeen = new Date(userReg.lastSeen).getTime();
             if (Date.now() - lastSeen < 10000) {
@@ -197,7 +221,7 @@ async function handleAction(data, env) {
         }
     }
 
-    // Update registry
+    // Update registry with resolved role
     await updateUserRegistry(env, username, { status: 'online', role }, hasKV);
     
     // Broadcast updates
@@ -215,10 +239,9 @@ async function handleAction(data, env) {
     return;
   }
   
-  // Heartbeat/Ping from client to keep registry alive
+  // Heartbeat/Ping
   if (type === 'ping') {
       if (username && username !== 'Anonymous') {
-          // Just update timestamp, no broadcast
           await updateUserRegistry(env, username, { status: 'online' }, hasKV);
       }
       return;
@@ -237,17 +260,20 @@ async function handleAction(data, env) {
           broadcastGlobal(leaveMsg);
           broadcastUserList(env, hasKV);
       }
-      // We also clean up local session if it exists on this instance
-      if (session) {
-          CLIENTS.delete(clientId);
-      }
+      if (session) CLIENTS.delete(clientId);
       return;
   }
 
-  // Identify sender's role
+  // Identify sender's role based on PERMISSIONS first, then Registry
   const senderName = username || (session ? session.username : 'Anonymous');
-  const senderInfo = registry[senderName];
-  const senderRole = senderInfo ? (senderInfo.role || 'user') : 'user';
+  const senderPerm = permissions[senderName];
+  const senderRole = senderPerm ? senderPerm.role : (registry[senderName]?.role || 'user');
+
+  // Block banned users from actions
+  if (senderRole === 'banned') {
+      sendPrivateSystem(session, `You are banned and cannot perform actions.`);
+      return;
+  }
 
   if (type === 'chat') {
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -265,11 +291,12 @@ async function handleAction(data, env) {
     await appendToHistory(env, chatMsg, hasKV);
   
   } else if (type === 'cmd_admin') {
-      // Claim admin
-      // Check secret against Env Var or hardcoded fallback
+      // Claim admin via secret
       const serverSecret = env.ADMIN_SECRET || 'secret123';
       if (secret === serverSecret) {
-          await updateUserRegistry(env, senderName, { role: 'admin' }, hasKV);
+          await updatePermissionsRegistry(env, senderName, { role: 'admin' }, hasKV);
+          await updateUserRegistry(env, senderName, { role: 'admin' }, hasKV); // Sync active
+          
           sendPrivateSystem(session, `Admin privileges granted to ${senderName}.`);
           broadcastUserList(env, hasKV);
       } else {
@@ -281,13 +308,13 @@ async function handleAction(data, env) {
           sendPrivateSystem(session, `Permission denied. You are not an admin.`);
           return;
       }
-      if (targetUser && registry[targetUser]) {
+      if (targetUser) {
+          await updatePermissionsRegistry(env, targetUser, { role: 'admin' }, hasKV);
           await updateUserRegistry(env, targetUser, { role: 'admin' }, hasKV);
+          
           sendPrivateSystem(session, `User ${targetUser} promoted to Admin.`);
           broadcastGlobal({ type: 'system', content: `SERVER: ${targetUser} was promoted to Admin by ${senderName}.` });
           broadcastUserList(env, hasKV);
-      } else {
-          sendPrivateSystem(session, `User ${targetUser} not found in registry.`);
       }
 
   } else if (type === 'cmd_deop') {
@@ -295,13 +322,52 @@ async function handleAction(data, env) {
           sendPrivateSystem(session, `Permission denied. You are not an admin.`);
           return;
       }
-      if (targetUser && registry[targetUser]) {
+      if (targetUser) {
+          // Revert to 'user' in permissions
+          await updatePermissionsRegistry(env, targetUser, { role: 'user' }, hasKV);
           await updateUserRegistry(env, targetUser, { role: 'user' }, hasKV);
+          
           sendPrivateSystem(session, `User ${targetUser} demoted to User.`);
           broadcastGlobal({ type: 'system', content: `SERVER: ${targetUser} was demoted by ${senderName}.` });
           broadcastUserList(env, hasKV);
-      } else {
-          sendPrivateSystem(session, `User ${targetUser} not found in registry.`);
+      }
+  
+  } else if (type === 'cmd_ban') {
+      if (senderRole !== 'admin') {
+          sendPrivateSystem(session, `Permission denied. You are not an admin.`);
+          return;
+      }
+      if (targetUser) {
+          if (targetUser === senderName) {
+              sendPrivateSystem(session, `You cannot ban yourself.`);
+              return;
+          }
+          
+          // Set 'banned' in permissions
+          await updatePermissionsRegistry(env, targetUser, { role: 'banned' }, hasKV);
+          // Set offline in registry and remove role from registry view
+          await updateUserRegistry(env, targetUser, { status: 'offline', role: 'banned' }, hasKV);
+          
+          broadcastGlobal({ type: 'system', content: `SERVER: ${targetUser} has been BANNED by ${senderName}.` });
+          broadcastUserList(env, hasKV);
+
+          // Force disconnect if active
+          kickUserByUsername(targetUser);
+      }
+
+  } else if (type === 'cmd_unban') {
+      if (senderRole !== 'admin') {
+          sendPrivateSystem(session, `Permission denied. You are not an admin.`);
+          return;
+      }
+      if (targetUser) {
+          // Reset to 'user'
+          await updatePermissionsRegistry(env, targetUser, { role: 'user' }, hasKV);
+          // Update registry info (though they are likely offline)
+          await updateUserRegistry(env, targetUser, { role: 'user' }, hasKV);
+          
+          sendPrivateSystem(session, `User ${targetUser} unbanned.`);
+          broadcastGlobal({ type: 'system', content: `SERVER: ${targetUser} was unbanned by ${senderName}.` });
       }
 
   } else if (type === 'cmd_list_users') {
@@ -323,26 +389,20 @@ async function handleDisconnect(clientId, env) {
   const session = CLIENTS.get(clientId);
   if (session) {
     CLIENTS.delete(clientId);
-    
     const username = session.username;
     
     if (username !== 'Anonymous') {
         setTimeout(async () => {
-             // Passive cleanup check (fallback if explicit 'leave' wasn't received)
-             // We check if the user has updated their registry status recently.
              const hasKV = !!env.CHAT_KV;
              const registry = await getUserRegistry(env, hasKV);
              const userReg = registry[username];
              
              if (userReg && userReg.status === 'online') {
-                 // Check if lastSeen is older than 45 seconds (30s heartbeat + buffer)
                  const lastSeen = new Date(userReg.lastSeen).getTime();
                  const timeDiff = Date.now() - lastSeen;
                  
-                 // If silent for > 45s, mark offline
                  if (timeDiff > 45000) {
                      await updateUserRegistry(env, username, { status: 'offline' }, hasKV);
-                     
                      const leaveMsg = {
                         type: 'system',
                         id: `sys-leave-${Date.now()}-${Math.random().toString(36).substr(2)}`,
@@ -399,22 +459,35 @@ function sendPrivateSystem(session, text) {
     }
 }
 
-// Fixed broadcastUserList to actually fetch registry first if available, 
-// OR just broadcast based on local knowledge merged with what we have.
-// To be accurate, we should just send what we have in registry.
+/**
+ * Finds all sessions for a username and closes them with a message
+ */
+function kickUserByUsername(username) {
+    for (const [clientId, session] of CLIENTS.entries()) {
+        if (session.username === username) {
+            sendPrivateSystem(session, "You have been kicked/banned from the server.");
+            // We can't strictly 'close' the SSE from here easily without aborting controller,
+            // but we can remove them from CLIENTS which effectively kills their heartbeat logic
+            // and interaction ability.
+            CLIENTS.delete(clientId);
+            try {
+                session.controller.close();
+            } catch(e) {}
+        }
+    }
+}
+
 async function broadcastUserList(env, hasKV) {
-    /** @type {UserRegistry} */
     const registry = await getUserRegistry(env, hasKV);
     const onlineUsers = [];
     
     for (const [username, rawInfo] of Object.entries(registry)) {
         /** @type {UserInfo} */
         const info = /** @type {any} */ (rawInfo);
-        // Basic timeout check for list generation (if > 60s silent, treat as offline even if reg says online)
         const lastSeen = new Date(info.lastSeen).getTime();
         const isActuallyOnline = (Date.now() - lastSeen) < 60000;
 
-        if (info.status === 'online' && isActuallyOnline) {
+        if (info.status === 'online' && isActuallyOnline && info.role !== 'banned') {
             onlineUsers.push({
                 username,
                 status: 'online',
@@ -432,31 +505,19 @@ async function broadcastUserList(env, hasKV) {
     broadcastGlobal(msg);
 }
 
-// --- Registry & History Helpers ---
+// --- Registry Helpers (Online Status) ---
 
 async function updateUserRegistry(env, username, updates, hasKV) {
     try {
         const now = new Date().toISOString();
-        let registry = {};
-
-        if (hasKV) {
-            const regStr = await env.CHAT_KV.get(REGISTRY_KEY);
-            registry = regStr ? JSON.parse(regStr) : {};
-        } else {
-            registry = MEMORY_USER_REGISTRY;
-        }
-
-        if (!registry) registry = {};
-
-        const existing = registry[username] || {};
+        let registry = await getUserRegistry(env, hasKV);
         
         registry[username] = {
-            ...existing,
+            ...(registry[username] || {}),
             ...updates,
             lastSeen: now
         };
 
-        // Cleanup old offline users if memory
         if (!hasKV) {
              const keys = Object.keys(registry);
              if (keys.length > 100) {
@@ -472,11 +533,6 @@ async function updateUserRegistry(env, username, updates, hasKV) {
     } catch(e) { console.error(e); }
 }
 
-/**
- * @param {any} env
- * @param {boolean} hasKV
- * @returns {Promise<UserRegistry>}
- */
 async function getUserRegistry(env, hasKV) {
     try {
         if (hasKV) {
@@ -484,6 +540,40 @@ async function getUserRegistry(env, hasKV) {
             return regStr ? JSON.parse(regStr) : {};
         } else {
             return MEMORY_USER_REGISTRY;
+        }
+    } catch (e) {
+        return {};
+    }
+}
+
+// --- Permissions Helpers (Roles Persistence) ---
+
+async function updatePermissionsRegistry(env, username, updates, hasKV) {
+    try {
+        const now = Date.now();
+        let permissions = await getPermissionsRegistry(env, hasKV);
+        
+        permissions[username] = {
+            ...(permissions[username] || {}),
+            ...updates,
+            updatedAt:now
+        };
+
+        if (hasKV) {
+            await env.CHAT_KV.put(PERMISSIONS_KEY, JSON.stringify(permissions));
+        } else {
+            MEMORY_PERMISSIONS_REGISTRY = permissions;
+        }
+    } catch(e) { console.error("Perm Update Error", e); }
+}
+
+async function getPermissionsRegistry(env, hasKV) {
+    try {
+        if (hasKV) {
+            const str = await env.CHAT_KV.get(PERMISSIONS_KEY);
+            return str ? JSON.parse(str) : {};
+        } else {
+            return MEMORY_PERMISSIONS_REGISTRY;
         }
     } catch (e) {
         return {};

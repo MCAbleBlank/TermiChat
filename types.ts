@@ -2,14 +2,14 @@ export interface User {
   username: string;
   color: string; // ANSI color code or hex equivalent class
   status: 'online' | 'offline';
-  role?: 'admin' | 'user';
+  role?: 'admin' | 'user' | 'banned';
 }
 
 export interface Message {
   id: string;
   userId: string;
   username: string;
-  role?: 'admin' | 'user';
+  role?: 'admin' | 'user' | 'banned';
   content: string;
   timestamp: Date;
   type: 'system' | 'chat' | 'error' | 'command_output';
@@ -39,4 +39,6 @@ export const AVAILABLE_COMMANDS = [
   { cmd: '/admin', desc: '<secret> Claim admin rights' },
   { cmd: '/op', desc: '<user> Grant admin rights' },
   { cmd: '/deop', desc: '<user> Revoke admin rights' },
+  { cmd: '/ban', desc: '<user> Ban user from server' },
+  { cmd: '/unban', desc: '<user> Unban user' },
 ];

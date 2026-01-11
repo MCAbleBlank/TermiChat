@@ -14,6 +14,9 @@ const RoleBadge = ({ role }: { role?: string }) => {
     if (role === 'admin') {
         return <span className="text-red-500 font-bold mr-1">[A]</span>;
     }
+    if (role === 'banned') {
+        return <span className="text-gray-500 font-bold mr-1 line-through">[BAN]</span>;
+    }
     return null;
 };
 

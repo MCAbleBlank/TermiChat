@@ -154,6 +154,8 @@ ${ANSI.WHITE}Available Commands:${ANSI.RESET}
   ${ANSI.CYAN}/admin <key>   ${ANSI.RESET} - Claim admin privileges
   ${ANSI.CYAN}/op <user>     ${ANSI.RESET} - Grant admin privileges
   ${ANSI.CYAN}/deop <user>   ${ANSI.RESET} - Revoke admin privileges
+  ${ANSI.CYAN}/ban <user>    ${ANSI.RESET} - Ban a user (Admin)
+  ${ANSI.CYAN}/unban <user>  ${ANSI.RESET} - Unban a user (Admin)
 `, 'command_output');
         return true;
 
@@ -256,6 +258,24 @@ ${ANSI.WHITE}Available Commands:${ANSI.RESET}
         }
         if (status !== ConnectionStatus.CONNECTED) return true;
         await socketService.sendCommand('cmd_deop', { targetUser: args[1] });
+        return true;
+
+      case '/ban':
+        if (!args[1]) {
+            addSystemMessage('Usage: /ban <username>', 'error');
+            return true;
+        }
+        if (status !== ConnectionStatus.CONNECTED) return true;
+        await socketService.sendCommand('cmd_ban', { targetUser: args[1] });
+        return true;
+
+      case '/unban':
+        if (!args[1]) {
+            addSystemMessage('Usage: /unban <username>', 'error');
+            return true;
+        }
+        if (status !== ConnectionStatus.CONNECTED) return true;
+        await socketService.sendCommand('cmd_unban', { targetUser: args[1] });
         return true;
 
       default:
