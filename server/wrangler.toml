@@ -1,0 +1,31 @@
+name = "termichat-server"
+main = "worker.mjs"
+compatibility_date = "2025-12-20"
+
+workers_dev = false
+
+[[routes]]
+pattern = "chat.mcableblank.dpdns.org"
+zone_name = "mcableblank.dpdns.org"
+custom_domain = true
+
+[[kv_namespaces]]
+binding = "CHAT_KV"
+id = "7a9b5b06fd9640feacd77f07fc826650"
+
+
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
